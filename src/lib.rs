@@ -1,5 +1,6 @@
 #![feature(unboxed_closures)]
 #![feature(slicing_syntax)]
+#![feature(if_let)]
 
 use std::error::Error;
 use std::error::FromError;
@@ -122,14 +123,12 @@ pub fn resumable_file_copy(dst_path: &Path, src_path: &Path) -> Receiver<Progres
             None => 0,
         };
 
-        match src_file.seek(position, std::io::SeekSet) {
-            Err(_) => return true,
-            Ok(_) => (),
+        if let Err(_) = src_file.seek(position, std::io::SeekSet) {
+            return true;
         }
 
-        match dst_file.seek(position, std::io::SeekSet) {
-            Err(_) => return true,
-            Ok(_) => (),
+        if let Err(_) = dst_file.seek(position, std::io::SeekSet) {
+            return true;
         }
 
         while position < file_size {
