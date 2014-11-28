@@ -84,13 +84,7 @@ fn copy_chunk<R: Reader, W: Writer>(w: &mut W, r: &mut R) -> RCopyResult<()> {
 }
 
 fn read_position(fpath: &Path) -> Option<i64> {
-    match fs::File::open(fpath) {
-        Ok(mut f) => match f.read_be_i64() {
-            Ok(n) => Some(n),
-            Err(_) => None,
-        },
-        Err(_) => None,
-    }
+    fs::File::open(fpath).and_then(|mut f| f.read_be_i64()).ok()
 }
 
 fn write_position(fpath: &Path, position: i64) -> RCopyResult<()> {
