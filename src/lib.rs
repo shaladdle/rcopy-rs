@@ -80,7 +80,7 @@ fn copy_chunk<R: Reader, W: Writer>(w: &mut W, r: &mut R) -> RCopyResult<()> {
         }
     }
     try!(w.write(buf[..pos]));
-    return Ok(())
+    Ok(())
 }
 
 fn read_position(fpath: &Path) -> Option<i64> {
