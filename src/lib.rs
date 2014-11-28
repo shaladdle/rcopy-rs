@@ -96,19 +96,22 @@ fn write_position(fpath: &Path, position: i64) -> RCopyResult<()> {
 }
 
 pub fn resumable_file_copy(dst_path: &Path, src_path: &Path) -> Receiver<ProgressInfo> {
+    // Copy these so they can be captured by the retry
+    let (src_path, dst_path) = (src_path.clone(), dst_path.clone());
     let (tx, rx) = channel();
-    retry_exp(Duration::seconds(4), || {
-        let mut src_file = match fs::File::open(src_path) {
+    tx.send(ProgressInfo{current: 100, total: 100});
+    spawn(proc() { retry_exp(Duration::seconds(4), || {
+        let mut src_file = match fs::File::open(&src_path) {
             Ok(f) => f,
             Err(_) => return true,
         };
 
-        let file_size = match fs::stat(src_path) {
+        let file_size = match fs::stat(&src_path) {
             Ok(info) => info.size as i64,
             Err(_) => return true,
         };
 
-        let mut dst_file = match fs::File::open_mode(src_path, std::io::Open, std::io::Write) {
+        let mut dst_file = match fs::File::open_mode(&src_path, std::io::Open, std::io::Write) {
             Ok(f) => f,
             Err(_) => return true,
         };
@@ -145,6 +148,6 @@ pub fn resumable_file_copy(dst_path: &Path, src_path: &Path) -> Receiver<Progres
         }
 
         return false;
-    });
+    })});
     return rx;
 }
