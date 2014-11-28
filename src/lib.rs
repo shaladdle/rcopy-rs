@@ -123,5 +123,5 @@ pub fn resumable_file_copy(dst_path: &Path, src_path: &Path) -> Receiver<Progres
 
         Ok(())
     })});
-    return rx;
+    rx
 }
