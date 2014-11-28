@@ -96,7 +96,7 @@ fn write_position(fpath: &Path, position: i64) -> RCopyResult<()> {
 }
 
 pub fn resumable_file_copy(dst_path: &Path, src_path: &Path) -> Receiver<ProgressInfo> {
-    let (_, rx) = channel();
+    let (tx, rx) = channel();
     retry_exp(Duration::seconds(4), || {
         let mut src_file = match fs::File::open(src_path) {
             Ok(f) => f,
@@ -141,6 +141,7 @@ pub fn resumable_file_copy(dst_path: &Path, src_path: &Path) -> Receiver<Progres
                 Err(_) => return true,
                 Ok(_) => (),
             }
+            tx.send(ProgressInfo{current: position, total: file_size});
         }
 
         return false;
