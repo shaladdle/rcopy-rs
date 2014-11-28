@@ -13,6 +13,8 @@ use std::time::duration::Duration;
 
 pub struct RCopyError(String);
 
+const CHUNK_SIZE : uint = 8 << 20; // 8MiB
+
 impl FromError<IoError> for RCopyError {
     fn from_error(io_error: IoError) -> RCopyError {
         RCopyError(io_error.description().to_string())
@@ -62,7 +64,6 @@ fn retry_exp<F: FnMut<(), bool>>(max_wait: Duration, mut f: F) {
 }
 
 fn copy_chunk<R: Reader, W: Writer>(w: &mut W, r: &mut R) -> RCopyResult<()> {
-    const CHUNK_SIZE : uint = 8 << 20; // 8MiB
     let mut buf = [0, ..CHUNK_SIZE];
     match r.read_at_least(CHUNK_SIZE, buf[mut]) {
         Ok(n) => {
@@ -93,7 +94,7 @@ fn write_position(fpath: &Path, position: i64) -> RCopyResult<()> {
     Ok(try!(f.write_be_i64(position)))
 }
 
-pub fn ResumableFileCopy(dst_path: &Path, src_path: &Path) -> Receiver<ProgressInfo> {
+pub fn resumable_file_copy(dst_path: &Path, src_path: &Path) -> Receiver<ProgressInfo> {
     let (_, rx) = channel();
     retry_exp(Duration::seconds(4), || {
         let mut src_file = match fs::File::open(src_path) {
@@ -133,6 +134,11 @@ pub fn ResumableFileCopy(dst_path: &Path, src_path: &Path) -> Receiver<ProgressI
 
         while position < file_size {
             match copy_chunk(&mut dst_file, &mut src_file) {
+                Err(_) => return true,
+                Ok(_) => (),
+            }
+            position += CHUNK_SIZE as i64;
+            match write_position(&prog_path, position) {
                 Err(_) => return true,
                 Ok(_) => (),
             }
