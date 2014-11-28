@@ -14,7 +14,7 @@ use std::time::duration::Duration;
 
 pub struct RCopyError(String);
 
-const CHUNK_SIZE : uint = 8 << 20; // 8MiB
+const CHUNK_SIZE : uint = 1 << 20; // 1MiB
 
 impl FromError<IoError> for RCopyError {
     fn from_error(io_error: IoError) -> RCopyError {
