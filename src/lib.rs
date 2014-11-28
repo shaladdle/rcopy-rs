@@ -111,7 +111,7 @@ pub fn resumable_file_copy(dst_path: &Path, src_path: &Path) -> Receiver<Progres
             Err(_) => return true,
         };
 
-        let mut dst_file = match fs::File::open_mode(&src_path, std::io::Open, std::io::Write) {
+        let mut dst_file = match fs::File::open_mode(&dst_path, std::io::Open, std::io::Write) {
             Ok(f) => f,
             Err(_) => return true,
         };
