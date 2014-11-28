@@ -147,6 +147,9 @@ pub fn resumable_file_copy(dst_path: &Path, src_path: &Path) -> Receiver<Progres
                 return true;
             }
         }
+        if let Err(e) = fs::unlink(&prog_path) {
+            println!("Error removing progress file: {}", e);
+        };
 
         return false;
     })});

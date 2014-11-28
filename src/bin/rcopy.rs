@@ -26,17 +26,18 @@ fn main() {
         }
     };
     for src_file_path in elems {
-        match fs::stat(&src_file_path) {
+        let file_size = match fs::stat(&src_file_path) {
             Ok(info) =>  {
                 if info.kind == TypeDirectory {
                     continue;
                 }
+                info.size
             },
             Err(e) => {
                 println!("Couldn't stat file \"{}\" while walking: {}", src_file_path.display(), e);
                 continue;
             },
-        }
+        };
         let rel_file_path = match src_file_path.path_relative_from(&src_dir_path) {
             Some(p) => p,
             None => {
@@ -46,6 +47,21 @@ fn main() {
             },
         };
         let dst_file_path = dst_dir_path.join(&rel_file_path);
+
+        // If the file already exists and it has the right file size, assume it was copied
+        // properly.
+        //
+        // TODO: what if there is a progress file there? Do we remove it? That's kind of an
+        // implementation detail :(.
+        match fs::stat(&dst_file_path) {
+            Ok(FileStat{size: existing_file_size, ..}) => {
+                if existing_file_size == file_size {
+                    println!("[ {}/{} ] {} (skipped)", file_size, file_size, rel_file_path.display());
+                    continue;
+                }
+            },
+            _ => (),
+        }
 
         // Create the containing directory for the destination file if it doesn't exist.
         let dst_file_dir_path = dst_file_path.dir_path();
