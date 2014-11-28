@@ -119,11 +119,13 @@ pub fn resumable_file_copy(dst_path: &Path, src_path: &Path) -> Receiver<Progres
             Err(_) => return true,
         };
 
-        let ext = match dst_path.extension_str() {
-            Some(ext) => ext,
-            None => return true,
-        };
+        let ext = dst_path.extension_str().unwrap_or("");
         let prog_path = dst_path.with_extension(format!("{}{}", ext, ".progress"));
+
+        // TODO: One reason read_position might fail could be that there is already a file called
+        // dst_file_path.progress. In this case, what is the right thing to do? Certainly I don't
+        // want to overwrite some file that's already there unless it was a progress file created
+        // by me.
         let mut position = read_position(&prog_path).unwrap_or(0);
 
         if let Err(_) = src_file.seek(position, std::io::SeekSet) {
