@@ -1,0 +1,13 @@
+[package]
+
+name = "rcopy"
+version = "0.0.1"
+authors = ["Adam Wright <adam.austin.wright@gmail.com>"]
+
+[[bin]]
+name = "rcopy"
+path = "src/rcopy.rs"
+
+[[bin]]
+name = "rcopyd"
+path = "src/rcopyd.rs"
