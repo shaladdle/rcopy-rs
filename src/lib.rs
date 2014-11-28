@@ -124,10 +124,7 @@ pub fn resumable_file_copy(dst_path: &Path, src_path: &Path) -> Receiver<Progres
             None => return true,
         };
         let prog_path = dst_path.with_extension(format!("{}{}", ext, ".progress"));
-        let mut position = match read_position(&prog_path) {
-            Some(p) => p,
-            None => 0,
-        };
+        let mut position = read_position(&prog_path).unwrap_or(0);
 
         if let Err(_) = src_file.seek(position, std::io::SeekSet) {
             return true;
