@@ -52,9 +52,9 @@ pub struct ProgressInfo {
 
 // Retries f until it returns false, backing off exponentially each time. The total
 // time waited after a retry will not exceed max_wait.
-fn retry_exp<F: FnMut<(), bool>>(max_wait: Duration, mut f: F) {
+fn retry_exp<F: FnMut() -> RCopyResult<()>>(max_wait: Duration, mut f: F) {
     let mut n = 0;
-    while f() {
+    while f().is_err() {
         let mut ms = Duration::milliseconds(1 << n);
         if ms > max_wait {
             ms = max_wait;
@@ -104,53 +104,30 @@ pub fn resumable_file_copy(dst_path: &Path, src_path: &Path) -> Receiver<Progres
     let (tx, rx) = channel();
     tx.send(ProgressInfo{current: 100, total: 100});
     spawn(proc() { retry_exp(Duration::seconds(4), || {
-        let mut src_file = match fs::File::open(&src_path) {
-            Ok(f) => f,
-            Err(_) => return true,
-        };
-
-        let file_size = match fs::stat(&src_path) {
-            Ok(info) => info.size as i64,
-            Err(_) => return true,
-        };
-
-        let mut dst_file = match fs::File::open_mode(&dst_path, std::io::Open, std::io::Write) {
-            Ok(f) => f,
-            Err(_) => return true,
-        };
-
+        let mut src_file = try!(fs::File::open(&src_path));
+        let file_size = try!(fs::stat(&src_path)).size as i64;
+        let mut dst_file = try!(fs::File::open_mode(&dst_path, std::io::Open, std::io::Write));
         let ext = dst_path.extension_str().unwrap_or("");
         let prog_path = dst_path.with_extension(format!("{}{}", ext, ".progress"));
-
         // TODO: One reason read_position might fail could be that there is already a file called
         // dst_file_path.progress. In this case, what is the right thing to do? Certainly I don't
         // want to overwrite some file that's already there unless it was a progress file created
         // by me.
         let mut position = read_position(&prog_path).unwrap_or(0);
-
-        if let Err(_) = src_file.seek(position, std::io::SeekSet) {
-            return true;
-        }
-
-        if let Err(_) = dst_file.seek(position, std::io::SeekSet) {
-            return true;
-        }
+        try!(src_file.seek(position, std::io::SeekSet));
+        try!(dst_file.seek(position, std::io::SeekSet));
 
         while position < file_size {
             tx.send(ProgressInfo{current: position, total: file_size});
-            if let Err(_) = copy_chunk(&mut dst_file, &mut src_file) {
-                return true;
-            }
+            try!(copy_chunk(&mut dst_file, &mut src_file));
             position += CHUNK_SIZE as i64;
-            if let Err(_) = write_position(&prog_path, position) {
-                return true;
-            }
+            try!(write_position(&prog_path, position));
         }
         if let Err(e) = fs::unlink(&prog_path) {
             println!("Error removing progress file: {}", e);
         };
 
-        return false;
+        Ok(())
     })});
     return rx;
 }
