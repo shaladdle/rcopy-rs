@@ -66,17 +66,20 @@ fn retry_exp<F: FnMut<(), bool>>(max_wait: Duration, mut f: F) {
 
 fn copy_chunk<R: Reader, W: Writer>(w: &mut W, r: &mut R) -> RCopyResult<()> {
     let mut buf = [0, ..CHUNK_SIZE];
-    match r.read_at_least(CHUNK_SIZE, buf[mut]) {
-        Ok(n) => {
-            if n > CHUNK_SIZE {
-                return Err(RCopyError("n was bigger than CHUNK_SIZE, which should be impossible..".to_string()));
-            }
-        },
-        Err(e) => return Err(FromError::from_error(e)),
+    let mut pos = 0;
+    while pos < CHUNK_SIZE {
+        match r.read(buf[mut]) {
+            Ok(n) => {
+                pos += n;
+                if pos == CHUNK_SIZE {
+                    break
+                }
+            },
+            Err(IoError{kind: std::io::EndOfFile, ..}) => break,
+            Err(e) => return Err(FromError::from_error(e)),
+        }
     }
-
-    try!(w.write(buf[]));
-
+    try!(w.write(buf[..pos]));
     return Ok(())
 }
 
