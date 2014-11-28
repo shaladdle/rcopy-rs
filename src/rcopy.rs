@@ -1,6 +1,8 @@
 use std::io::fs;
 use std::os;
 
+use rcopylib as rcopy;
+
 mod rcopylib;
 
 fn main() {
