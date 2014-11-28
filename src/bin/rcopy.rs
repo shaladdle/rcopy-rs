@@ -1,9 +1,7 @@
+extern crate rcopy;
+
 use std::io::fs;
 use std::os;
-
-use rcopylib as rcopy;
-
-mod rcopylib;
 
 fn main() {
     let (src_dir, _) = match os::args().as_slice() {

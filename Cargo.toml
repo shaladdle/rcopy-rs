@@ -6,8 +6,8 @@ authors = ["Adam Wright <adam.austin.wright@gmail.com>"]
 
 [[bin]]
 name = "rcopy"
-path = "src/rcopy.rs"
+path = "src/bin/rcopy.rs"
 
 [[bin]]
 name = "rcopyd"
-path = "src/rcopyd.rs"
+path = "src/bin/rcopyd.rs"

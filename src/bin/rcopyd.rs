@@ -1,9 +1,9 @@
+extern crate rcopy;
+
 use std::error::Error;
 
-mod rcopylib;
-
 fn main() {
-    let mut daemon = match rcopylib::RCopyDaemon::new("localhost:9000") {
+    let mut daemon = match rcopy::RCopyDaemon::new("localhost:9000") {
         Ok(daemon) => daemon,
         Err(ref err) => {
             println!("error occurred creating the daemon: {}", err.description());

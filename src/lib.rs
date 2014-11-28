@@ -46,7 +46,5 @@ pub struct ProgressInfo {
 fn retry<F: FnMut<(), ()>>() {
 }
 
-pub fn ResumableFileCopy(dst_path: Path, src_path: Path) -> Messages<ProgressInfo> {
-    let (_, rx) = channel();
-    return rx.iter()
+pub fn ResumableFileCopy(dst_path: Path, src_path: Path) {
 }
