@@ -135,16 +135,14 @@ pub fn resumable_file_copy(dst_path: &Path, src_path: &Path) -> Receiver<Progres
         }
 
         while position < file_size {
-            match copy_chunk(&mut dst_file, &mut src_file) {
-                Err(_) => return true,
-                Ok(_) => (),
+            tx.send(ProgressInfo{current: position, total: file_size});
+            if let Err(_) = copy_chunk(&mut dst_file, &mut src_file) {
+                return true;
             }
             position += CHUNK_SIZE as i64;
-            match write_position(&prog_path, position) {
-                Err(_) => return true,
-                Ok(_) => (),
+            if let Err(_) = write_position(&prog_path, position) {
+                return true;
             }
-            tx.send(ProgressInfo{current: position, total: file_size});
         }
 
         return false;
