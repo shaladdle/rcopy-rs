@@ -37,6 +37,20 @@ impl Error for RCopyError {
             IoError(ref e) => e.description(),
         }
     }
+
+    fn detail(&self) -> Option<String> {
+        if let RCopyError::IoError(ref e) = *self {
+            return e.detail();
+        }
+        None
+    }
+
+    fn cause(&self) -> Option<&Error> {
+        if let RCopyError::IoError(ref e) = *self {
+            return e.cause();
+        }
+        None
+    }
 }
 
 pub type RCopyResult<T> = Result<T, RCopyError>;
