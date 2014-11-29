@@ -38,14 +38,7 @@ fn main() {
                 continue;
             },
         };
-        let rel_file = match src_file.path_relative_from(&src_dir) {
-            Some(p) => p,
-            None => {
-                println!("Couldn't get relative path for \"{}\" relative to \"{}\"", src_file.display(), src_dir.display());
-                std::os::set_exit_status(-1);
-                return;
-            },
-        };
+        let rel_file = src_file.path_relative_from(&src_dir).expect("Couldn't do path_relative_from, something terrible has happened");
         let dst_file = dst_dir.join(&rel_file);
 
         // If the file already exists and it has the right file size, assume it was copied
