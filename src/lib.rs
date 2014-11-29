@@ -11,10 +11,11 @@ use std::io::{Reader,Writer};
 use std::io::fs;
 use std::comm::channel;
 use std::time::duration::Duration;
+use std::vec::Vec;
 
 pub struct RCopyError(String);
 
-const CHUNK_SIZE : uint = 1 << 20; // 1MiB
+const CHUNK_SIZE : uint = 8 << 20; // 8MiB
 
 impl FromError<IoError> for RCopyError {
     fn from_error(io_error: IoError) -> RCopyError {
@@ -64,14 +65,13 @@ fn retry_exp<F: FnMut() -> RCopyResult<()>>(max_wait: Duration, mut f: F) {
     }
 }
 
-fn copy_chunk<R: Reader, W: Writer>(w: &mut W, r: &mut R) -> RCopyResult<()> {
-    let mut buf = [0, ..CHUNK_SIZE];
+fn copy_chunk<R: Reader, W: Writer>(w: &mut W, r: &mut R, buf: &mut [u8]) -> RCopyResult<uint> {
     let mut pos = 0;
-    while pos < CHUNK_SIZE {
+    while pos < buf.len() {
         match r.read(buf[mut]) {
             Ok(n) => {
                 pos += n;
-                if pos == CHUNK_SIZE {
+                if pos == buf.len() {
                     break
                 }
             },
@@ -80,7 +80,7 @@ fn copy_chunk<R: Reader, W: Writer>(w: &mut W, r: &mut R) -> RCopyResult<()> {
         }
     }
     try!(w.write(buf[..pos]));
-    Ok(())
+    Ok(pos)
 }
 
 fn read_position(fpath: &Path) -> Option<i64> {
@@ -111,11 +111,14 @@ pub fn resumable_file_copy(dst_path: &Path, src_path: &Path) -> Receiver<Progres
         try!(src_file.seek(position, std::io::SeekSet));
         try!(dst_file.seek(position, std::io::SeekSet));
 
+        let mut buf = Vec::new();
+        buf.grow(CHUNK_SIZE, 0);
+        tx.send(ProgressInfo{current: 0, total: file_size});
         while position < file_size {
-            tx.send(ProgressInfo{current: position, total: file_size});
-            try!(copy_chunk(&mut dst_file, &mut src_file));
-            position += CHUNK_SIZE as i64;
+            let ncopied = try!(copy_chunk(&mut dst_file, &mut src_file, buf[mut])) as i64;
+            position += ncopied as i64;
             try!(write_position(&prog_path, position));
+            tx.send(ProgressInfo{current: position, total: file_size});
         }
         if let Err(e) = fs::unlink(&prog_path) {
             println!("Error removing progress file: {}", e);
