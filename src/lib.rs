@@ -1,6 +1,7 @@
 #![feature(unboxed_closures)]
 #![feature(slicing_syntax)]
 #![feature(if_let)]
+#![feature(globs)]
 
 use std::error::Error;
 use std::error::FromError;
@@ -13,24 +14,32 @@ use std::comm::channel;
 use std::time::duration::Duration;
 use std::vec::Vec;
 
-pub struct RCopyError(String);
-
 const CHUNK_SIZE : uint = 8 << 20; // 8MiB
+
+pub enum RCopyError{
+    NotImplemented,
+    ProgFileNotFound,
+    IoError(io::IoError),
+}
 
 impl FromError<io::IoError> for RCopyError {
     fn from_error(io_error: io::IoError) -> RCopyError {
-        RCopyError(io_error.description().to_string())
+        RCopyError::IoError(io_error)
+    }
+}
+
+impl Error for RCopyError {
+    fn description(&self) -> &str {
+        use RCopyError::*;
+        match *self {
+            NotImplemented => "not implemented",
+            ProgFileNotFound => "progress file not found",
+            IoError(ref e) => e.description(),
+        }
     }
 }
 
 pub type RCopyResult<T> = Result<T, RCopyError>;
-
-impl Error for RCopyError {
-    fn description(&self) -> &str {
-        let RCopyError(ref s) = *self;
-        s.as_slice()
-    }
-}
 
 #[allow(dead_code)]
 pub struct RCopyDaemon {
@@ -42,7 +51,7 @@ impl RCopyDaemon {
         Ok(RCopyDaemon{hostport: try!(hostport.to_socket_addr())})
     }
     pub fn serve(&mut self) -> RCopyError {
-        RCopyError("not implemented".to_string())
+        RCopyError::NotImplemented
     }
 }
 
@@ -83,8 +92,15 @@ fn copy_chunk<R: Reader, W: Writer>(w: &mut W, r: &mut R, buf: &mut [u8]) -> RCo
     Ok(pos)
 }
 
-fn read_position(fpath: &Path) -> Option<i64> {
-    fs::File::open(fpath).and_then(|mut f| f.read_be_i64()).ok()
+fn read_position(fpath: &Path) -> RCopyResult<i64> {
+    let mut f = match fs::File::open(fpath) {
+        Ok(f) => f,
+        Err(io::IoError{kind: io::FileNotFound, ..}) => {
+            return Err(RCopyError::ProgFileNotFound);
+        },
+        Err(e) => return Err(FromError::from_error(e)),
+    };
+    Ok(try!(f.read_be_i64()))
 }
 
 fn write_position(fpath: &Path, position: i64) -> RCopyResult<()> {
@@ -103,13 +119,21 @@ pub fn resumable_file_copy(dst_path: &Path, src_path: &Path) -> Receiver<Progres
         let mut dst_file = try!(fs::File::open_mode(&dst_path, std::io::Open, std::io::Write));
         let ext = dst_path.extension_str().unwrap_or("");
         let prog_path = dst_path.with_extension(format!("{}{}", ext, ".progress"));
+
         // TODO: One reason read_position might fail could be that there is already a file called
         // dst_file_path.progress. In this case, what is the right thing to do? Certainly I don't
         // want to overwrite some file that's already there unless it was a progress file created
         // by me.
-        let mut position = read_position(&prog_path).unwrap_or(0);
+        let mut position = match read_position(&prog_path) {
+            Ok(p) => p,
+            Err(RCopyError::ProgFileNotFound) => 0,
+            Err(e) => return Err(FromError::from_error(e)),
+        };
         try!(src_file.seek(position, std::io::SeekSet));
         try!(dst_file.seek(position, std::io::SeekSet));
+
+        // Now that we are at the right position in the file, wrap the reader in a buffered reader.
+        let mut src_file = io::BufferedReader::with_capacity(2 * CHUNK_SIZE, src_file);
 
         let mut buf = Vec::new();
         buf.grow(CHUNK_SIZE, 0);
