@@ -6,9 +6,9 @@ use std::error::Error;
 use std::error::FromError;
 use std::io::net::ip::ToSocketAddr;
 use std::io::net::ip::SocketAddr;
-use std::io::IoError;
 use std::io::{Reader,Writer};
 use std::io::fs;
+use std::io;
 use std::comm::channel;
 use std::time::duration::Duration;
 use std::vec::Vec;
@@ -17,8 +17,8 @@ pub struct RCopyError(String);
 
 const CHUNK_SIZE : uint = 8 << 20; // 8MiB
 
-impl FromError<IoError> for RCopyError {
-    fn from_error(io_error: IoError) -> RCopyError {
+impl FromError<io::IoError> for RCopyError {
+    fn from_error(io_error: io::IoError) -> RCopyError {
         RCopyError(io_error.description().to_string())
     }
 }
@@ -75,7 +75,7 @@ fn copy_chunk<R: Reader, W: Writer>(w: &mut W, r: &mut R, buf: &mut [u8]) -> RCo
                     break
                 }
             },
-            Err(IoError{kind: std::io::EndOfFile, ..}) => break,
+            Err(io::IoError{kind: std::io::EndOfFile, ..}) => break,
             Err(e) => return Err(FromError::from_error(e)),
         }
     }
