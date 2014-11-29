@@ -8,6 +8,13 @@ use std::os;
 use std::io::FileStat;
 use std::io::{TypeFile, TypeDirectory};
 
+fn calc_percent(current: f64, total: f64) -> Option<f64> {
+    if total == 0f64 {
+        return None;
+    }
+    Some(100f64 * current / total)
+}
+
 fn main() {
     let (src_dir, dst_dir) = match os::args()[] {
         [_, ref s, ref d] => (Path::new(s), Path::new(d)),
@@ -49,7 +56,7 @@ fn main() {
         match fs::stat(&dst_file) {
             Ok(FileStat{size: existing_file_size, ..}) => {
                 if existing_file_size == file_size {
-                    println!("[ {}/{} ] {} (skipped)", file_size, file_size, rel_file.display());
+                    println!("[ {:3.2}% ] {} (skipped)", 100f64, rel_file.display());
                     continue;
                 }
             },
@@ -79,7 +86,8 @@ fn main() {
 
         // Wait for the copy to be complete, printing progress as it goes
         for progress in progress_rx.iter() {
-            print!("\r[ {}/{} ] {}", progress.current, progress.total, rel_file.display());
+            let percent = calc_percent(progress.current as f64, progress.total as f64).unwrap_or(0f64);
+            print!("[ {:3.2}% ] {}\r", percent, rel_file.display());
         }
         print!("\n");
     }
