@@ -121,47 +121,59 @@ fn write_position(fpath: &Path, position: i64) -> RCopyResult<()> {
     Ok(try!(f.write_be_i64(position)))
 }
 
+// Given a destination file, returns the path for the associated progress file.
+fn progress_file_path(dst_file: &Path) -> Path {
+    let ext = dst_file.extension_str().unwrap_or("");
+    dst_file.with_extension(format!("{}{}", ext, ".progress"))
+}
+
+fn try_copy(dst_path: &Path, src_path: &Path, tx: &Sender<ProgressInfo>) -> RCopyResult<()> {
+    let mut src_file = try!(fs::File::open(src_path));
+    let file_size = try!(fs::stat(src_path)).size as i64;
+    let mut dst_file = try!(fs::File::open_mode(dst_path, std::io::Open, std::io::Write));
+    let prog_path = progress_file_path(dst_path);
+
+    // TODO: One reason read_position might fail could be that there is already a file called
+    // dst_file_path.progress. In this case, what is the right thing to do? Certainly I don't
+    // want to overwrite some file that's already there unless it was a progress file created
+    // by me.
+    let mut position = match read_position(&prog_path) {
+        Ok(p) => p,
+        Err(RCopyError::IoError(io::IoError{kind: io::FileNotFound, ..})) => 0,
+        Err(e) => return Err(error::FromError::from_error(e)),
+    };
+    try!(src_file.seek(position, std::io::SeekSet));
+    try!(dst_file.seek(position, std::io::SeekSet));
+
+    // Now that we are at the right position in the file, wrap the reader in a buffered reader.
+    let mut src_file = io::BufferedReader::with_capacity(2 * CHUNK_SIZE, src_file);
+
+    let mut buf = Vec::new();
+    buf.grow(CHUNK_SIZE, 0);
+    tx.send(ProgressInfo{current: 0, total: file_size});
+    while position < file_size {
+        let ncopied = try!(copy_chunk(&mut dst_file, &mut src_file, buf[mut])) as i64;
+        position += ncopied as i64;
+        try!(write_position(&prog_path, position));
+        tx.send(ProgressInfo{current: position, total: file_size});
+    }
+    if let Err(e) = fs::unlink(&prog_path) {
+        println!("Error removing progress file: {}", e);
+    };
+
+    Ok(())
+}
+
+// TODO: Figure out how to pass back non retryable errors and remove this allow.
+#[allow(unused_must_use)]
 pub fn resumable_file_copy(dst_path: &Path, src_path: &Path) -> Receiver<ProgressInfo> {
     // Copy these so they can be captured by the retry
     let (src_path, dst_path) = (src_path.clone(), dst_path.clone());
     let (tx, rx) = channel();
-    tx.send(ProgressInfo{current: 100, total: 100});
-    spawn(proc() { retry_exp(Duration::seconds(4), || {
-        let mut src_file = try!(fs::File::open(&src_path));
-        let file_size = try!(fs::stat(&src_path)).size as i64;
-        let mut dst_file = try!(fs::File::open_mode(&dst_path, std::io::Open, std::io::Write));
-        let ext = dst_path.extension_str().unwrap_or("");
-        let prog_path = dst_path.with_extension(format!("{}{}", ext, ".progress"));
-
-        // TODO: One reason read_position might fail could be that there is already a file called
-        // dst_file_path.progress. In this case, what is the right thing to do? Certainly I don't
-        // want to overwrite some file that's already there unless it was a progress file created
-        // by me.
-        let mut position = match read_position(&prog_path) {
-            Ok(p) => p,
-            Err(RCopyError::ProgFileNotFound) => 0,
-            Err(e) => return Err(error::FromError::from_error(e)),
-        };
-        try!(src_file.seek(position, std::io::SeekSet));
-        try!(dst_file.seek(position, std::io::SeekSet));
-
-        // Now that we are at the right position in the file, wrap the reader in a buffered reader.
-        let mut src_file = io::BufferedReader::with_capacity(2 * CHUNK_SIZE, src_file);
-
-        let mut buf = Vec::new();
-        buf.grow(CHUNK_SIZE, 0);
-        tx.send(ProgressInfo{current: 0, total: file_size});
-        while position < file_size {
-            let ncopied = try!(copy_chunk(&mut dst_file, &mut src_file, buf[mut])) as i64;
-            position += ncopied as i64;
-            try!(write_position(&prog_path, position));
-            tx.send(ProgressInfo{current: position, total: file_size});
-        }
-        if let Err(e) = fs::unlink(&prog_path) {
-            println!("Error removing progress file: {}", e);
-        };
-
-        Ok(())
-    })});
+    spawn(proc() {
+        retry_exp(Duration::seconds(4), || {
+            try_copy(&dst_path, &src_path, &tx)
+        });
+    });
     rx
 }
