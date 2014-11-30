@@ -71,7 +71,7 @@ fn main() {
                 return;
             },
             Err(io::IoError{kind: io::FileNotFound, ..}) => {
-                if let Err(e) = fs::mkdir(&dst_file_dir, std::io::USER_DIR) {
+                if let Err(e) = fs::mkdir_recursive(&dst_file_dir, std::io::USER_DIR) {
                     println!("Couldn't create destination file's directory \"{}\": {}", dst_file_dir.display(), e);
                     std::os::set_exit_status(-1);
                     return;
