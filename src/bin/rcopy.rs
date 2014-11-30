@@ -70,12 +70,17 @@ fn main() {
                 std::os::set_exit_status(-1);
                 return;
             },
-            Err(_) => {
+            Err(io::IoError{kind: io::FileNotFound, ..}) => {
                 if let Err(e) = fs::mkdir(&dst_file_dir, std::io::USER_DIR) {
                     println!("Couldn't create destination file's directory \"{}\": {}", dst_file_dir.display(), e);
                     std::os::set_exit_status(-1);
                     return;
                 }
+            },
+            Err(e) => {
+                println!("Couldn't stat destination file directory \"{}\": {}", dst_file_dir.display(), e);
+                std::os::set_exit_status(-1);
+                return;
             },
             _ => (),
         }
