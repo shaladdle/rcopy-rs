@@ -3,10 +3,9 @@
 
 extern crate rcopy;
 
+use std::io;
 use std::io::fs;
 use std::os;
-use std::io::FileStat;
-use std::io::{TypeFile, TypeDirectory};
 
 fn calc_percent(current: f64, total: f64) -> Option<f64> {
     if total == 0f64 {
@@ -35,7 +34,7 @@ fn main() {
     for src_file in elems {
         let file_size = match fs::stat(&src_file) {
             Ok(info) =>  {
-                if info.kind == TypeDirectory {
+                if info.kind == io::TypeDirectory {
                     continue;
                 }
                 info.size
@@ -54,7 +53,7 @@ fn main() {
         // TODO: what if there is a progress file there? Do we remove it? That's kind of an
         // implementation detail :(.
         match fs::stat(&dst_file) {
-            Ok(FileStat{size: existing_file_size, ..}) => {
+            Ok(io::FileStat{size: existing_file_size, ..}) => {
                 if existing_file_size == file_size {
                     println!("[ {:3.2}% ] {} (skipped)", 100f64, rel_file.display());
                     continue;
@@ -66,18 +65,18 @@ fn main() {
         // Create the containing directory for the destination file if it doesn't exist.
         let dst_file_dir = dst_file.dir_path();
         match fs::stat(&dst_file_dir) {
-            Ok(FileStat{kind: TypeFile, ..}) => {
+            Ok(io::FileStat{kind: io::TypeFile, ..}) => {
                 println!("Want \"{}\" to be a directory, but it already exists as a file", dst_file_dir.display());
                 std::os::set_exit_status(-1);
                 return;
-            }
+            },
             Err(_) => {
                 if let Err(e) = fs::mkdir(&dst_file_dir, std::io::USER_DIR) {
                     println!("Couldn't create destination file's directory \"{}\": {}", dst_file_dir.display(), e);
                     std::os::set_exit_status(-1);
                     return;
                 }
-            }
+            },
             _ => (),
         }
 
