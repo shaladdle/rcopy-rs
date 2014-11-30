@@ -7,6 +7,34 @@ extern crate rcopy;
 use std::io;
 use std::io::fs;
 use std::os;
+use std::time;
+use std::comm;
+
+struct TimeMeasure {
+    tx_done: Sender<()>,
+    rx_time: Receiver<time::Duration>,
+}
+
+impl TimeMeasure {
+    fn start() -> TimeMeasure {
+        let (tx_done, rx_done) = comm::channel();
+        let (tx_time, rx_time) = comm::channel();
+        spawn(proc() {
+            tx_time.send(time::Duration::span(|| {
+                rx_done.recv();
+            }));
+        });
+        TimeMeasure{
+            tx_done: tx_done,
+            rx_time: rx_time,
+        }
+    }
+
+    fn done(&self) -> time::Duration {
+        self.tx_done.send(());
+        self.rx_time.recv()
+    }
+}
 
 fn calc_percent(current: f64, total: f64) -> Option<f64> {
     if total == 0f64 {
@@ -129,6 +157,8 @@ fn main() {
             return;
         }
 
+        let mut bytes_to_copy : i64 = 0;
+        let measure = TimeMeasure::start();
         // Start the async copy
         let status_rx = rcopy::resumable_file_copy(&dst_file, &src_file);
         // Wait for the copy to be complete, printing progress as it goes
@@ -141,10 +171,20 @@ fn main() {
                 },
                 Ok(p) => p,
             };
+            // Set this to the total number of bytes we will copy in this call to
+            // resumable_file_copy. This is used to measure transfer speed.
+            if bytes_to_copy == 0 {
+                bytes_to_copy = progress.total - progress.current;
+            }
             let percent = calc_percent(progress.current as f64, progress.total as f64).unwrap_or(0f64);
-            print!("[ {:3.2}% ] {}\r", percent, rel_file.display());
+            print!("\r[ {:6.2}% ] {}", percent, rel_file.display());
             std::io::stdio::flush();
         }
+        // Compute the average transfer speed for this invocation of resumable_file_copy.
+        let ms = measure.done().num_milliseconds();
+        let mb_per_ms = (bytes_to_copy / (1 << 20)) as f64 / ms as f64;
+        let mb_per_second = mb_per_ms * 1000f64;
+        print!(" ({:.2}MB/s)", mb_per_second);
         print!("\n");
     }
 }
