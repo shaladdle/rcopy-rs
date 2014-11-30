@@ -122,6 +122,32 @@ fn try_mkdir(fpath: &Path) -> Result<(), MkDstDirError> {
     }
 }
 
+fn copy_file(dst_file: &Path, src_file: &Path, rel_file: &Path) -> Result<(), StringError> {
+    let mut bytes_to_copy : i64 = 0;
+    let measure = TimeMeasure::start();
+    // Start the async copy
+    let status_rx = rcopy::resumable_file_copy(dst_file, src_file);
+    // Wait for the copy to be complete, printing progress as it goes
+    for status in status_rx.iter() {
+        let progress = try!(status);
+        // Set this to the total number of bytes we will copy in this call to
+        // resumable_file_copy. This is used to measure transfer speed.
+        if bytes_to_copy == 0 {
+            bytes_to_copy = progress.total - progress.current;
+        }
+        let percent = calc_percent(progress.current as f64, progress.total as f64).unwrap_or(0f64);
+        print!("\r[ {:6.2}% ] {}", percent, rel_file.display());
+        std::io::stdio::flush();
+    }
+    // Compute the average transfer speed for this invocation of resumable_file_copy.
+    let ms = measure.done().num_milliseconds();
+    let mb_per_ms = (bytes_to_copy / (1 << 20)) as f64 / ms as f64;
+    let mb_per_second = mb_per_ms * 1000f64;
+    print!(" ({:.2}MB/s)", mb_per_second);
+    print!("\n");
+    Ok(())
+}
+
 fn copy_directory(dst_dir: &Path, src_dir: &Path) -> Result<(), StringError> {
     let mut elems = try!(fs::walk_dir(src_dir));
     for src_file in elems {
@@ -148,29 +174,7 @@ fn copy_directory(dst_dir: &Path, src_dir: &Path) -> Result<(), StringError> {
         }
 
         try!(try_mkdir(&dst_file));
-
-        let mut bytes_to_copy : i64 = 0;
-        let measure = TimeMeasure::start();
-        // Start the async copy
-        let status_rx = rcopy::resumable_file_copy(&dst_file, &src_file);
-        // Wait for the copy to be complete, printing progress as it goes
-        for status in status_rx.iter() {
-            let progress = try!(status);
-            // Set this to the total number of bytes we will copy in this call to
-            // resumable_file_copy. This is used to measure transfer speed.
-            if bytes_to_copy == 0 {
-                bytes_to_copy = progress.total - progress.current;
-            }
-            let percent = calc_percent(progress.current as f64, progress.total as f64).unwrap_or(0f64);
-            print!("\r[ {:6.2}% ] {}", percent, rel_file.display());
-            std::io::stdio::flush();
-        }
-        // Compute the average transfer speed for this invocation of resumable_file_copy.
-        let ms = measure.done().num_milliseconds();
-        let mb_per_ms = (bytes_to_copy / (1 << 20)) as f64 / ms as f64;
-        let mb_per_second = mb_per_ms * 1000f64;
-        print!(" ({:.2}MB/s)", mb_per_second);
-        print!("\n");
+        try!(copy_file(&dst_file, &src_file, &rel_file));
     }
     Ok(())
 }
