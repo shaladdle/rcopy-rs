@@ -218,7 +218,7 @@ fn try_copy(dst_path: &Path, src_path: &Path, tx: &Sender<RCopyResult<ProgressIn
     tx.send(Ok(ProgressInfo{current: 0, total: file_size}));
     while position < file_size {
         let ncopied = try!(copy_chunk(&mut dst_file, &mut src_file, buf[mut])) as i64;
-        position += ncopied as i64;
+        position += ncopied;
         try!(write_position(&prog_path, position));
         tx.send(Ok(ProgressInfo{current: position, total: file_size}));
     }
