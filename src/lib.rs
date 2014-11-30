@@ -3,8 +3,7 @@
 #![feature(if_let)]
 #![feature(globs)]
 
-use std::error::Error;
-use std::error::FromError;
+use std::error;
 use std::io::net::ip::ToSocketAddr;
 use std::io::net::ip::SocketAddr;
 use std::io::{Reader,Writer};
@@ -22,13 +21,13 @@ pub enum RCopyError{
     IoError(io::IoError),
 }
 
-impl FromError<io::IoError> for RCopyError {
+impl error::FromError<io::IoError> for RCopyError {
     fn from_error(io_error: io::IoError) -> RCopyError {
         RCopyError::IoError(io_error)
     }
 }
 
-impl Error for RCopyError {
+impl error::Error for RCopyError {
     fn description(&self) -> &str {
         use RCopyError::*;
         match *self {
@@ -45,7 +44,7 @@ impl Error for RCopyError {
         None
     }
 
-    fn cause(&self) -> Option<&Error> {
+    fn cause(&self) -> Option<&error::Error> {
         if let RCopyError::IoError(ref e) = *self {
             return e.cause();
         }
@@ -99,7 +98,7 @@ fn copy_chunk<R: Reader, W: Writer>(w: &mut W, r: &mut R, buf: &mut [u8]) -> RCo
                 }
             },
             Err(io::IoError{kind: std::io::EndOfFile, ..}) => break,
-            Err(e) => return Err(FromError::from_error(e)),
+            Err(e) => return Err(error::FromError::from_error(e)),
         }
     }
     try!(w.write(buf[..pos]));
@@ -112,7 +111,7 @@ fn read_position(fpath: &Path) -> RCopyResult<i64> {
         Err(io::IoError{kind: io::FileNotFound, ..}) => {
             return Err(RCopyError::ProgFileNotFound);
         },
-        Err(e) => return Err(FromError::from_error(e)),
+        Err(e) => return Err(error::FromError::from_error(e)),
     };
     Ok(try!(f.read_be_i64()))
 }
@@ -141,7 +140,7 @@ pub fn resumable_file_copy(dst_path: &Path, src_path: &Path) -> Receiver<Progres
         let mut position = match read_position(&prog_path) {
             Ok(p) => p,
             Err(RCopyError::ProgFileNotFound) => 0,
-            Err(e) => return Err(FromError::from_error(e)),
+            Err(e) => return Err(error::FromError::from_error(e)),
         };
         try!(src_file.seek(position, std::io::SeekSet));
         try!(dst_file.seek(position, std::io::SeekSet));
