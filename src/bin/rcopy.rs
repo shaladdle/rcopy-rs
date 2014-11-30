@@ -3,9 +3,9 @@
 
 extern crate rcopy;
 
-use std::io;
+use std::{io, os};
 use std::io::fs;
-use std::os;
+use std::io::stdio::flush;
 
 fn calc_percent(current: f64, total: f64) -> Option<f64> {
     if total == 0f64 {
@@ -99,6 +99,7 @@ fn main() {
             };
             let percent = calc_percent(progress.current as f64, progress.total as f64).unwrap_or(0f64);
             print!("[ {:3.2}% ] {}\r", percent, rel_file.display());
+            flush();
         }
         print!("\n");
     }
