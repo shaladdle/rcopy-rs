@@ -1,5 +1,6 @@
 #![feature(slicing_syntax)]
 #![feature(if_let)]
+#![feature(globs)]
 
 extern crate rcopy;
 
@@ -12,6 +13,66 @@ fn calc_percent(current: f64, total: f64) -> Option<f64> {
         return None;
     }
     Some(100f64 * current / total)
+}
+
+enum StringError {
+    Message(String),
+    IoError(io::IoError),
+}
+
+impl std::fmt::Show for StringError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+        use StringError::*;
+        match *self {
+            Message(ref s) => s.fmt(formatter),
+            IoError(ref e) => e.fmt(formatter),
+        }
+    }
+}
+
+enum MkDstDirError {
+    FoundRegularFileNotDir(Path),
+    MkDirFailed(io::IoError),
+    IoError(io::IoError),
+}
+
+impl std::fmt::Show for MkDstDirError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+        use MkDstDirError::*;
+        match *self {
+            FoundRegularFileNotDir(ref dir_path) =>
+                format!("destination's file directory \"{}\" is a regular file, move this file somewhere else to continue", dir_path.display()).fmt(formatter),
+            MkDirFailed(ref io_error) => format!("failed to create directory: {}", io_error).fmt(formatter),
+            IoError(ref io_error) => io_error.fmt(formatter),
+        }
+    }
+}
+
+// TODO: Have a better check than "the destination file is the same size as the source file" for
+// determining that the file was already copied.
+fn file_already_copied(fpath: &Path, file_size: u64) -> Result<bool, StringError> {
+    match fs::stat(fpath) {
+        Ok(io::FileStat{kind: io::TypeDirectory, ..}) =>
+            Err(StringError::Message(format!("destination file \"{}\" exists and is a directory", fpath.display()))),
+        Ok(io::FileStat{size: existing_file_size, ..}) => Ok(existing_file_size == file_size),
+        Err(io::IoError{kind: io::FileNotFound, ..}) => Ok(false),
+        Err(e) => Err(StringError::IoError(e)),
+    }
+}
+
+fn try_mkdir(fpath: &Path) -> Result<(), MkDstDirError> {
+    let fdir = fpath.dir_path();
+    match fs::stat(&fdir) {
+        Ok(io::FileStat{kind: io::TypeFile, ..}) => Err(MkDstDirError::FoundRegularFileNotDir(fdir.clone())),
+        Err(io::IoError{kind: io::FileNotFound, ..}) => {
+            if let Err(e) = fs::mkdir_recursive(&fdir, std::io::USER_DIR) {
+                return Err(MkDstDirError::MkDirFailed(e));
+            }
+            Ok(())
+        },
+        Err(e) => Err(MkDstDirError::IoError(e)),
+        _ => Ok(()),
+    }
 }
 
 fn main() {
@@ -49,40 +110,23 @@ fn main() {
 
         // If the file already exists and it has the right file size, assume it was copied
         // properly.
-        //
-        // TODO: what if there is a progress file there? Do we remove it? That's kind of an
-        // implementation detail :(.
-        match fs::stat(&dst_file) {
-            Ok(io::FileStat{size: existing_file_size, ..}) => {
-                if existing_file_size == file_size {
-                    println!("[ {:3.2}% ] {} (skipped)", 100f64, rel_file.display());
-                    continue;
-                }
-            },
-            _ => (),
+        match file_already_copied(&dst_file, file_size) {
+            Ok(true) => {
+                println!("[ {:3.2}% ] {} (skipped)", 100f64, rel_file.display());
+                continue;
+            }
+            Ok(false) => (),
+            Err(e) => {
+                println!("Error: {}", e);
+                std::os::set_exit_status(-1);
+                return;
+            }
         }
 
-        // Create the containing directory for the destination file if it doesn't exist.
-        let dst_file_dir = dst_file.dir_path();
-        match fs::stat(&dst_file_dir) {
-            Ok(io::FileStat{kind: io::TypeFile, ..}) => {
-                println!("Want \"{}\" to be a directory, but it already exists as a file", dst_file_dir.display());
-                std::os::set_exit_status(-1);
-                return;
-            },
-            Err(io::IoError{kind: io::FileNotFound, ..}) => {
-                if let Err(e) = fs::mkdir_recursive(&dst_file_dir, std::io::USER_DIR) {
-                    println!("Couldn't create destination file's directory \"{}\": {}", dst_file_dir.display(), e);
-                    std::os::set_exit_status(-1);
-                    return;
-                }
-            },
-            Err(e) => {
-                println!("Couldn't stat destination file directory \"{}\": {}", dst_file_dir.display(), e);
-                std::os::set_exit_status(-1);
-                return;
-            },
-            _ => (),
+        if let Err(e) = try_mkdir(&dst_file) {
+            println!("Error: {}", e);
+            std::os::set_exit_status(-1);
+            return;
         }
 
         // Start the async copy
