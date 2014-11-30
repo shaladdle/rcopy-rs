@@ -87,6 +87,7 @@ impl error::Error for RCopyError {
 
 pub type RCopyResult<T> = Result<T, RCopyError>;
 
+// TODO: Move this daemon stuff to another file.
 #[allow(dead_code)]
 pub struct RCopyDaemon {
     hostport: SocketAddr,
