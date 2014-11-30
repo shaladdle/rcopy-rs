@@ -215,7 +215,7 @@ fn try_copy(dst_path: &Path, src_path: &Path, tx: &Sender<RCopyResult<ProgressIn
 
     let mut buf = Vec::new();
     buf.grow(CHUNK_SIZE, 0);
-    tx.send(Ok(ProgressInfo{current: 0, total: file_size}));
+    tx.send(Ok(ProgressInfo{current: position, total: file_size}));
     while position < file_size {
         let ncopied = try!(copy_chunk(&mut dst_file, &mut src_file, buf[mut])) as i64;
         position += ncopied;
