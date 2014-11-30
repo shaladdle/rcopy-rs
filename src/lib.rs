@@ -15,10 +15,39 @@ use std::vec::Vec;
 
 const CHUNK_SIZE : uint = 8 << 20; // 8MiB
 
+pub enum ProgFileInvalidCause {
+    WrongEncodedSize(u64),
+    PosOutOfRange{position: i64, file_size: i64},
+}
+
+impl std::fmt::Show for ProgFileInvalidCause {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+        use ProgFileInvalidCause::*;
+        let message = match *self {
+            WrongEncodedSize(actual_size) =>
+                format!("Due to how position is encoded, the progress file should be 8 bytes.
+                         Its actual size is {}, so its format must be wrong", actual_size),
+            PosOutOfRange{position, file_size} =>
+                format!("The position read from the progress file is out of range. The position
+                         in the progress file was {}. The actual file size is {}.", position, file_size),
+        };
+        message.fmt(formatter)
+    }
+}
+
 pub enum RCopyError{
     NotImplemented,
-    ProgFileNotFound,
+    ProgFileInvalid{fpath: Path, cause: ProgFileInvalidCause},
     IoError(io::IoError),
+}
+
+impl RCopyError {
+    fn is_retryable(&self) -> bool {
+        match *self {
+            RCopyError::ProgFileInvalid{..} => false,
+            _ => true,
+        }
+    }
 }
 
 impl error::FromError<io::IoError> for RCopyError {
@@ -32,16 +61,20 @@ impl error::Error for RCopyError {
         use RCopyError::*;
         match *self {
             NotImplemented => "not implemented",
-            ProgFileNotFound => "progress file not found",
+            ProgFileInvalid{..} => "invalid progress file",
             IoError(ref e) => e.description(),
         }
     }
 
     fn detail(&self) -> Option<String> {
-        if let RCopyError::IoError(ref e) = *self {
-            return e.detail();
+        use RCopyError::*;
+        match *self {
+            ProgFileInvalid{ref fpath, ref cause} => {
+                Some(format!("progress file: \"{}\", cause: {}", fpath.display(), cause))
+            }
+            IoError(ref e) => e.detail(),
+            _ => None,
         }
-        None
     }
 
     fn cause(&self) -> Option<&error::Error> {
@@ -73,11 +106,17 @@ pub struct ProgressInfo {
     pub total: i64,
 }
 
-// Retries f until it returns false, backing off exponentially each time. The total
-// time waited after a retry will not exceed max_wait.
-fn retry_exp<F: FnMut() -> RCopyResult<()>>(max_wait: Duration, mut f: F) {
+// Retries f as long as it returns a 'retryable' error, as determined by the
+// RCopyError.is_retryable method.
+//
+// Time waited between retries increases exponentially, but will never exceed max_wait.
+fn retry_exp<F: FnMut() -> RCopyResult<()>>(max_wait: Duration, mut f: F) -> RCopyResult<()> {
     let mut n = 0;
-    while f().is_err() {
+    loop {
+        match f() {
+            Ok(_) => break,
+            Err(e) => if e.is_retryable() { break; },
+        }
         let mut ms = Duration::milliseconds(1 << n);
         if ms > max_wait {
             ms = max_wait;
@@ -85,6 +124,7 @@ fn retry_exp<F: FnMut() -> RCopyResult<()>>(max_wait: Duration, mut f: F) {
         n += 1;
         std::io::timer::sleep(ms);
     }
+    Ok(())
 }
 
 fn copy_chunk<R: Reader, W: Writer>(w: &mut W, r: &mut R, buf: &mut [u8]) -> RCopyResult<uint> {
@@ -105,17 +145,35 @@ fn copy_chunk<R: Reader, W: Writer>(w: &mut W, r: &mut R, buf: &mut [u8]) -> RCo
     Ok(pos)
 }
 
-fn read_position(fpath: &Path) -> RCopyResult<i64> {
-    let mut f = match fs::File::open(fpath) {
-        Ok(f) => f,
-        Err(io::IoError{kind: io::FileNotFound, ..}) => {
-            return Err(RCopyError::ProgFileNotFound);
-        },
-        Err(e) => return Err(error::FromError::from_error(e)),
-    };
-    Ok(try!(f.read_be_i64()))
+// Reads the position from the file at fpath.
+//
+// If the file at fpath is of the wrong format, it is assumed that the file that's there is a
+// progress file, and we would be clobbering somebody's data by continuing the operation.
+fn read_position(fpath: &Path, file_size: i64) -> RCopyResult<i64> {
+    use RCopyError::ProgFileInvalid;
+    use ProgFileInvalidCause::*;
+    let prog_file_size = try!(fs::stat(fpath)).size;
+    if prog_file_size != 8u64 {
+        let cause = WrongEncodedSize(prog_file_size);
+        return Err(ProgFileInvalid{fpath: fpath.clone(), cause: cause});
+    }
+    let mut f = try!(fs::File::open(fpath));
+    let position = try!(f.read_be_i64());
+    if position < 0 || position > file_size {
+        let cause = PosOutOfRange{
+            position: position,
+            file_size: file_size,
+        };
+        return Err(ProgFileInvalid{fpath: fpath.clone(), cause: cause});
+    }
+    Ok(position)
 }
 
+// TODO: Should we call read position here as a way to verify that the file we are about to
+// overwrite is valid? This would add a cost to writing the position, which is done frequently, but
+// might avoid overwriting somebody's file that happened to be named dst_file.progress. On one hand
+// I doubt this will ever come up, and on the other hand, it would be tragic to have rcopy have the
+// possibility of destroying someone's files.
 fn write_position(fpath: &Path, position: i64) -> RCopyResult<()> {
     let mut f = try!(fs::File::create(fpath));
     Ok(try!(f.write_be_i64(position)))
@@ -133,11 +191,7 @@ fn try_copy(dst_path: &Path, src_path: &Path, tx: &Sender<ProgressInfo>) -> RCop
     let mut dst_file = try!(fs::File::open_mode(dst_path, std::io::Open, std::io::Write));
     let prog_path = progress_file_path(dst_path);
 
-    // TODO: One reason read_position might fail could be that there is already a file called
-    // dst_file_path.progress. In this case, what is the right thing to do? Certainly I don't
-    // want to overwrite some file that's already there unless it was a progress file created
-    // by me.
-    let mut position = match read_position(&prog_path) {
+    let mut position = match read_position(&prog_path, file_size) {
         Ok(p) => p,
         Err(RCopyError::IoError(io::IoError{kind: io::FileNotFound, ..})) => 0,
         Err(e) => return Err(error::FromError::from_error(e)),
