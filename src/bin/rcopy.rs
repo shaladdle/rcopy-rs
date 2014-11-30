@@ -135,7 +135,7 @@ fn main() {
         for status in status_rx.iter() {
             let progress = match status {
                 Err(e) => {
-                    println!("Non-retryable error encountered while copying: {}", e);
+                    println!("Error: could not retry: {}", e);
                     std::os::set_exit_status(-1);
                     return;
                 },

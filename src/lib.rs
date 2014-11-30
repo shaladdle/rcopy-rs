@@ -25,9 +25,9 @@ impl std::fmt::Show for ProgFileInvalidCause {
         use ProgFileInvalidCause::*;
         let message = match *self {
             WrongEncodedSize(actual_size) =>
-                format!("Due to how position is encoded, the progress file should be 8 bytes. Its actual size is {}, so its format must be wrong", actual_size),
+                format!("Progress files are always 8 bytes long. Its actual size is {} bytes, so continuing may overwrite your data!", actual_size),
             PosOutOfRange{position, file_size} =>
-                format!("The position read from the progress file is out of range. The position in the progress file was {}. The actual file size is {}.", position, file_size),
+                format!("The position read from the progress file is out of range. The actual file size is {}, but I read a position of {}.", file_size, position),
         };
         message.fmt(formatter)
     }
@@ -68,7 +68,7 @@ impl error::Error for RCopyError {
         use RCopyError::*;
         match *self {
             ProgFileInvalid{ref fpath, ref cause} => {
-                Some(format!("progress file: \"{}\", cause: {}", fpath.display(), cause))
+                Some(format!("\"{}\", invalid because: {}", fpath.display(), cause))
             }
             IoError(ref e) => e.detail(),
             _ => None,
@@ -86,7 +86,11 @@ impl error::Error for RCopyError {
 impl std::fmt::Show for RCopyError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
         use std::error::Error;
-        self.description().fmt(formatter)
+        let message = match self.detail() {
+            Some(d) => format!("{}: {}", self.description(), d),
+            None => self.description().to_string(),
+        };
+        message.fmt(formatter)
     }
 }
 
@@ -120,9 +124,10 @@ fn retry_exp<F: FnMut() -> RCopyResult<()>>(max_wait: Duration, mut f: F) -> RCo
     let mut n = 0;
     loop {
         match f() {
-            Ok(_) => break,
-            Err(e) => if e.is_retryable() { break; },
+            Ok(()) => break,
+            Err(e) => if !e.is_retryable() { return Err(e) },
         }
+        println!("retrying");
         let mut ms = Duration::milliseconds(1 << n);
         if ms > max_wait {
             ms = max_wait;
@@ -200,7 +205,7 @@ fn try_copy(dst_path: &Path, src_path: &Path, tx: &Sender<RCopyResult<ProgressIn
     let mut position = match read_position(&prog_path, file_size) {
         Ok(p) => p,
         Err(RCopyError::IoError(io::IoError{kind: io::FileNotFound, ..})) => 0,
-        Err(e) => return Err(error::FromError::from_error(e)),
+        Err(e) => return Err(e),
     };
     try!(src_file.seek(position, std::io::SeekSet));
     try!(dst_file.seek(position, std::io::SeekSet));
@@ -224,7 +229,6 @@ fn try_copy(dst_path: &Path, src_path: &Path, tx: &Sender<RCopyResult<ProgressIn
     Ok(())
 }
 
-// TODO: Figure out how to pass back non retryable errors and remove this allow.
 pub fn resumable_file_copy(dst_path: &Path, src_path: &Path) -> Receiver<RCopyResult<ProgressInfo>> {
     // Copy these so they can be captured by the retry
     let (src_path, dst_path) = (src_path.clone(), dst_path.clone());
