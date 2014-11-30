@@ -82,10 +82,9 @@ fn main() {
         }
 
         // Start the async copy
-        let progress_rx = rcopy::resumable_file_copy(&dst_file, &src_file);
-
+        let status_rx = rcopy::resumable_file_copy(&dst_file, &src_file);
         // Wait for the copy to be complete, printing progress as it goes
-        for status in progress_rx.iter() {
+        for status in status_rx.iter() {
             let progress = match status {
                 Err(e) => {
                     println!("Non-retryable error encountered while copying: {}", e);
