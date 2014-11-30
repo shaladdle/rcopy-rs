@@ -25,11 +25,9 @@ impl std::fmt::Show for ProgFileInvalidCause {
         use ProgFileInvalidCause::*;
         let message = match *self {
             WrongEncodedSize(actual_size) =>
-                format!("Due to how position is encoded, the progress file should be 8 bytes.
-                         Its actual size is {}, so its format must be wrong", actual_size),
+                format!("Due to how position is encoded, the progress file should be 8 bytes. Its actual size is {}, so its format must be wrong", actual_size),
             PosOutOfRange{position, file_size} =>
-                format!("The position read from the progress file is out of range. The position
-                         in the progress file was {}. The actual file size is {}.", position, file_size),
+                format!("The position read from the progress file is out of range. The position in the progress file was {}. The actual file size is {}.", position, file_size),
         };
         message.fmt(formatter)
     }
