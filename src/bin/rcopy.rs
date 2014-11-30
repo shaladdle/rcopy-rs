@@ -5,6 +5,7 @@
 extern crate rcopy;
 
 use std::io;
+use std::error;
 use std::io::fs;
 use std::os;
 use std::time;
@@ -43,21 +44,6 @@ fn calc_percent(current: f64, total: f64) -> Option<f64> {
     Some(100f64 * current / total)
 }
 
-enum StringError {
-    Message(String),
-    IoError(io::IoError),
-}
-
-impl std::fmt::Show for StringError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
-        use StringError::*;
-        match *self {
-            Message(ref s) => s.fmt(formatter),
-            IoError(ref e) => e.fmt(formatter),
-        }
-    }
-}
-
 enum MkDstDirError {
     FoundRegularFileNotDir(Path),
     MkDirFailed(io::IoError),
@@ -73,6 +59,39 @@ impl std::fmt::Show for MkDstDirError {
             MkDirFailed(ref io_error) => format!("failed to create directory: {}", io_error).fmt(formatter),
             IoError(ref io_error) => io_error.fmt(formatter),
         }
+    }
+}
+
+enum StringError {
+    Message(String),
+    IoError(io::IoError),
+}
+
+impl std::fmt::Show for StringError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+        use StringError::*;
+        match *self {
+            Message(ref s) => s.fmt(formatter),
+            IoError(ref e) => e.fmt(formatter),
+        }
+    }
+}
+
+impl error::FromError<io::IoError> for StringError {
+    fn from_error(io_error: io::IoError) -> StringError {
+        StringError::IoError(io_error)
+    }
+}
+
+impl error::FromError<MkDstDirError> for StringError {
+    fn from_error(err: MkDstDirError) -> StringError {
+        StringError::Message(format!("{}", err))
+    }
+}
+
+impl error::FromError<rcopy::RCopyError> for StringError {
+    fn from_error(err: rcopy::RCopyError) -> StringError {
+        StringError::Message(format!("{}", err))
     }
 }
 
@@ -103,23 +122,8 @@ fn try_mkdir(fpath: &Path) -> Result<(), MkDstDirError> {
     }
 }
 
-fn main() {
-    let (src_dir, dst_dir) = match os::args()[] {
-        [_, ref s, ref d] => (Path::new(s), Path::new(d)),
-        _ => {
-            println!("usage: rcopy src_dir dst_dir");
-            return;
-        },
-    };
-
-    let mut elems = match fs::walk_dir(&src_dir) {
-        Ok(x) => x,
-        Err(e) => {
-            println!("Could not walk directory \"{}\": {}", src_dir.display(), e);
-            std::os::set_exit_status(-1);
-            return;
-        }
-    };
+fn copy_directory(dst_dir: &Path, src_dir: &Path) -> Result<(), StringError> {
+    let mut elems = try!(fs::walk_dir(src_dir));
     for src_file in elems {
         let file_size = match fs::stat(&src_file) {
             Ok(info) =>  {
@@ -133,29 +137,17 @@ fn main() {
                 continue;
             },
         };
-        let rel_file = src_file.path_relative_from(&src_dir).expect("Couldn't do path_relative_from, something terrible has happened");
+        let rel_file = src_file.path_relative_from(src_dir).expect("Couldn't do path_relative_from, something terrible has happened");
         let dst_file = dst_dir.join(&rel_file);
 
         // If the file already exists and it has the right file size, assume it was copied
         // properly.
-        match file_already_copied(&dst_file, file_size) {
-            Ok(true) => {
-                println!("[ {:3.2}% ] {} (skipped)", 100f64, rel_file.display());
-                continue;
-            }
-            Ok(false) => (),
-            Err(e) => {
-                println!("Error: {}", e);
-                std::os::set_exit_status(-1);
-                return;
-            }
+        if try!(file_already_copied(&dst_file, file_size)) {
+            println!("[ {:3.2}% ] {} (skipped)", 100f64, rel_file.display());
+            continue;
         }
 
-        if let Err(e) = try_mkdir(&dst_file) {
-            println!("Error: {}", e);
-            std::os::set_exit_status(-1);
-            return;
-        }
+        try!(try_mkdir(&dst_file));
 
         let mut bytes_to_copy : i64 = 0;
         let measure = TimeMeasure::start();
@@ -163,14 +155,7 @@ fn main() {
         let status_rx = rcopy::resumable_file_copy(&dst_file, &src_file);
         // Wait for the copy to be complete, printing progress as it goes
         for status in status_rx.iter() {
-            let progress = match status {
-                Err(e) => {
-                    println!("Error: could not retry: {}", e);
-                    std::os::set_exit_status(-1);
-                    return;
-                },
-                Ok(p) => p,
-            };
+            let progress = try!(status);
             // Set this to the total number of bytes we will copy in this call to
             // resumable_file_copy. This is used to measure transfer speed.
             if bytes_to_copy == 0 {
@@ -186,5 +171,21 @@ fn main() {
         let mb_per_second = mb_per_ms * 1000f64;
         print!(" ({:.2}MB/s)", mb_per_second);
         print!("\n");
+    }
+    Ok(())
+}
+
+fn main() {
+    let (src_dir, dst_dir) = match os::args()[] {
+        [_, ref s, ref d] => (Path::new(s), Path::new(d)),
+        _ => {
+            println!("usage: rcopy src_dir dst_dir");
+            return;
+        },
+    };
+
+    if let Err(e) = copy_directory(&dst_dir, &src_dir) {
+        println!("Error: {}", e);
+        std::os::set_exit_status(-1);
     }
 }
