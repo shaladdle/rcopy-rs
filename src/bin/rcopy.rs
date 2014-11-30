@@ -99,6 +99,7 @@ fn main() {
             };
             let percent = calc_percent(progress.current as f64, progress.total as f64).unwrap_or(0f64);
             print!("[ {:3.2}% ] {}\r", percent, rel_file.display());
+            std::io::stdio::flush();
         }
         print!("\n");
     }
