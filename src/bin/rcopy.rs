@@ -85,7 +85,15 @@ fn main() {
         let progress_rx = rcopy::resumable_file_copy(&dst_file, &src_file);
 
         // Wait for the copy to be complete, printing progress as it goes
-        for progress in progress_rx.iter() {
+        for status in progress_rx.iter() {
+            let progress = match status {
+                Err(e) => {
+                    println!("Non-retryable error encountered while copying: {}", e);
+                    std::os::set_exit_status(-1);
+                    return;
+                },
+                Ok(p) => p,
+            };
             let percent = calc_percent(progress.current as f64, progress.total as f64).unwrap_or(0f64);
             print!("[ {:3.2}% ] {}\r", percent, rel_file.display());
         }

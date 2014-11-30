@@ -85,6 +85,13 @@ impl error::Error for RCopyError {
     }
 }
 
+impl std::fmt::Show for RCopyError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+        use std::error::Error;
+        self.description().fmt(formatter)
+    }
+}
+
 pub type RCopyResult<T> = Result<T, RCopyError>;
 
 // TODO: Move this daemon stuff to another file.
@@ -186,7 +193,7 @@ fn progress_file_path(dst_file: &Path) -> Path {
     dst_file.with_extension(format!("{}{}", ext, ".progress"))
 }
 
-fn try_copy(dst_path: &Path, src_path: &Path, tx: &Sender<ProgressInfo>) -> RCopyResult<()> {
+fn try_copy(dst_path: &Path, src_path: &Path, tx: &Sender<RCopyResult<ProgressInfo>>) -> RCopyResult<()> {
     let mut src_file = try!(fs::File::open(src_path));
     let file_size = try!(fs::stat(src_path)).size as i64;
     let mut dst_file = try!(fs::File::open_mode(dst_path, std::io::Open, std::io::Write));
@@ -205,12 +212,12 @@ fn try_copy(dst_path: &Path, src_path: &Path, tx: &Sender<ProgressInfo>) -> RCop
 
     let mut buf = Vec::new();
     buf.grow(CHUNK_SIZE, 0);
-    tx.send(ProgressInfo{current: 0, total: file_size});
+    tx.send(Ok(ProgressInfo{current: 0, total: file_size}));
     while position < file_size {
         let ncopied = try!(copy_chunk(&mut dst_file, &mut src_file, buf[mut])) as i64;
         position += ncopied as i64;
         try!(write_position(&prog_path, position));
-        tx.send(ProgressInfo{current: position, total: file_size});
+        tx.send(Ok(ProgressInfo{current: position, total: file_size}));
     }
     if let Err(e) = fs::unlink(&prog_path) {
         println!("Error removing progress file: {}", e);
@@ -220,15 +227,17 @@ fn try_copy(dst_path: &Path, src_path: &Path, tx: &Sender<ProgressInfo>) -> RCop
 }
 
 // TODO: Figure out how to pass back non retryable errors and remove this allow.
-#[allow(unused_must_use)]
-pub fn resumable_file_copy(dst_path: &Path, src_path: &Path) -> Receiver<ProgressInfo> {
+pub fn resumable_file_copy(dst_path: &Path, src_path: &Path) -> Receiver<RCopyResult<ProgressInfo>> {
     // Copy these so they can be captured by the retry
     let (src_path, dst_path) = (src_path.clone(), dst_path.clone());
     let (tx, rx) = channel();
     spawn(proc() {
-        retry_exp(Duration::seconds(4), || {
+        let result = retry_exp(Duration::seconds(4), || {
             try_copy(&dst_path, &src_path, &tx)
         });
+        if let Err(e) = result {
+            tx.send(Err(e))
+        }
     });
     rx
 }
