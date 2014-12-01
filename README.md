@@ -20,7 +20,7 @@ usage
 ========
     rcopy src_dir dst_dir
 
-This recursively copies all files in src_dir to dst_dir. If the transfer is interrupted, rcopy will retry until it completes or an unrecoverable error has occurred. rcopy is not 
+This recursively copies all files in src_dir to dst_dir. If the transfer is interrupted, rcopy will retry until it completes or an unrecoverable error has occurred. If your machine crashes during the transfer, the transfer may be resumed by re-executing the original command.
 
 Status
 ========
