@@ -88,7 +88,7 @@ impl std::fmt::Show for RCopyError {
         use std::error::Error;
         let message = match self.detail() {
             Some(d) => format!("{}: {}", self.description(), d),
-            None => self.description().to_string(),
+            None => self.description().into_string(),
         };
         message.fmt(formatter)
     }
